@@ -9,7 +9,10 @@ import {
   listarVeiculos,
   salvarVeiculo,
   deletarVeiculo,
+  buscarUltimaManutencao,
+  manutencaoVencida,
   Veiculo,
+  Manutencao,
 } from "@/lib/db";
 
 const VAZIO: Omit<Veiculo, "id" | "criadoEm"> = {
@@ -21,13 +24,27 @@ const VAZIO: Omit<Veiculo, "id" | "criadoEm"> = {
 
 export default function VeiculosPage() {
   const [lista, setLista] = useState<Veiculo[]>([]);
+  const [alertas, setAlertas] = useState<Record<number, boolean>>({});
   const [form, setForm] = useState<Omit<Veiculo, "id" | "criadoEm">>(VAZIO);
   const [editandoId, setEditandoId] = useState<number | null>(null);
   const [mostraForm, setMostraForm] = useState(false);
   const [erros, setErros] = useState<Record<string, string>>({});
 
   async function carregar() {
-    setLista(await listarVeiculos());
+    const veiculos = await listarVeiculos();
+    setLista(veiculos);
+
+    const alertasMap: Record<number, boolean> = {};
+    await Promise.all(
+      veiculos.map(async (v) => {
+        if (!v.id) return;
+        const ultima: Manutencao | undefined = await buscarUltimaManutencao(v.id);
+        if (ultima) {
+          alertasMap[v.id] = manutencaoVencida(ultima, v.kmAtual ?? ultima.kmAtual);
+        }
+      })
+    );
+    setAlertas(alertasMap);
   }
 
   useEffect(() => { carregar(); }, []);
@@ -138,38 +155,51 @@ export default function VeiculosPage() {
             <p className="text-sm">Toque no + para adicionar</p>
           </div>
         )}
-        {lista.map((v) => (
-          <div
-            key={v.id}
-            className="bg-white rounded-2xl shadow-sm px-4 py-3 flex items-center gap-3"
-          >
-            <div className={`rounded-full p-2 ${v.ativo ? "bg-blue-100" : "bg-gray-100"}`}>
-              <Car size={18} className={v.ativo ? "text-blue-600" : "text-gray-400"} />
-            </div>
-            <div className="flex-1">
-              <p className="font-bold text-gray-800 tracking-wide">{v.placa}</p>
-              <p className="text-sm text-gray-600">{v.modelo}</p>
-              {v.motoristaPadrao && (
-                <p className="text-xs text-gray-400">{v.motoristaPadrao}</p>
-              )}
-              {!v.ativo && (
-                <span className="text-xs text-gray-400 italic">Inativo</span>
-              )}
-            </div>
-            <button
-              onClick={() => abrirEditar(v)}
-              className="p-2 text-gray-400 active:text-gray-600"
+        {lista.map((v) => {
+          const temAlerta = v.id ? !!alertas[v.id] : false;
+          return (
+            <div
+              key={v.id}
+              className="bg-white rounded-2xl shadow-sm px-4 py-3 flex items-center gap-3"
             >
-              <Pencil size={17} />
-            </button>
-            <button
-              onClick={() => excluir(v.id!)}
-              className="p-2 text-red-400 active:text-red-600"
-            >
-              <Trash2 size={17} />
-            </button>
-          </div>
-        ))}
+              <div className={`rounded-full p-2 ${temAlerta ? "bg-red-100" : v.ativo ? "bg-blue-100" : "bg-gray-100"}`}>
+                <Car size={18} className={temAlerta ? "text-red-500" : v.ativo ? "text-blue-600" : "text-gray-400"} />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="font-bold text-gray-800 tracking-wide">{v.placa}</p>
+                  {temAlerta && (
+                    <span className="text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded-full">
+                      MANUTENÇÃO
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-gray-600">{v.modelo}</p>
+                {v.motoristaPadrao && (
+                  <p className="text-xs text-gray-400">{v.motoristaPadrao}</p>
+                )}
+                {!v.ativo && (
+                  <span className="text-xs text-gray-400 italic">Inativo</span>
+                )}
+                {v.kmAtual !== undefined && (
+                  <p className="text-xs text-gray-400">KM atual: {v.kmAtual.toLocaleString("pt-BR")}</p>
+                )}
+              </div>
+              <button
+                onClick={() => abrirEditar(v)}
+                className="p-2 text-gray-400 active:text-gray-600"
+              >
+                <Pencil size={17} />
+              </button>
+              <button
+                onClick={() => excluir(v.id!)}
+                className="p-2 text-red-400 active:text-red-600"
+              >
+                <Trash2 size={17} />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

@@ -19,6 +19,7 @@ import Input from "@/components/Input";
 import {
   buscarRota,
   salvarRota,
+  listarAbastecimentosPorVeiculo,
   horaAtual,
   Rota,
   ItemRota,
@@ -55,10 +56,19 @@ export default function RotaPage({
   const [kmChegada, setKmChegada] = useState("");
   const [mostraFinalizacao, setMostraFinalizacao] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [consumoMedioVeiculo, setConsumoMedioVeiculo] = useState<number | undefined>(undefined);
 
   async function carregar() {
     const r = await buscarRota(Number(id));
-    if (r) setRota(r);
+    if (r) {
+      setRota(r);
+      const abs = await listarAbastecimentosPorVeiculo(r.veiculoId);
+      const comConsumo = abs.filter((a) => a.consumoKmL !== undefined).slice(0, 5);
+      if (comConsumo.length > 0) {
+        const media = comConsumo.reduce((s, a) => s + a.consumoKmL!, 0) / comConsumo.length;
+        setConsumoMedioVeiculo(media);
+      }
+    }
   }
 
   useEffect(() => { carregar(); }, [id]);
@@ -159,7 +169,7 @@ export default function RotaPage({
       await salvarRota(rotaFinalizada);
 
       if (enviarWhatsApp) {
-        const msg = mensagemEncerramentoRota(rotaFinalizada);
+        const msg = mensagemEncerramentoRota(rotaFinalizada, consumoMedioVeiculo);
         abrirWhatsApp(msg);
       }
 

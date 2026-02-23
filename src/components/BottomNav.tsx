@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Plus, Settings, Clock } from "lucide-react";
+import { Home, Plus, Settings, Clock, Wrench } from "lucide-react";
 
 const tabs = [
   { href: "/", label: "Início", icon: Home },
-  { href: "/rota/nova", label: "Nova Rota", icon: Plus },
+  { href: "/rota/nova", label: "Rota", icon: Plus },
   { href: "/historico", label: "Histórico", icon: Clock },
+  { href: "/manutencao", label: "Frota", icon: Wrench },
   { href: "/cadastros/cidades", label: "Cadastros", icon: Settings },
 ];
 
@@ -26,14 +27,14 @@ export default function BottomNav() {
             <Link
               key={href}
               href={href}
-              className={`flex-1 flex flex-col items-center py-2 gap-1 text-xs transition-colors ${
+              className={`flex-1 flex flex-col items-center py-2 gap-0.5 transition-colors ${
                 ativo
                   ? "text-[#ee4d2d]"
                   : "text-gray-500"
               }`}
             >
-              <Icon size={22} strokeWidth={ativo ? 2.5 : 1.8} />
-              <span className={ativo ? "font-semibold" : ""}>{label}</span>
+              <Icon size={20} strokeWidth={ativo ? 2.5 : 1.8} />
+              <span className={`text-[10px] ${ativo ? "font-semibold" : ""}`}>{label}</span>
             </Link>
           );
         })}

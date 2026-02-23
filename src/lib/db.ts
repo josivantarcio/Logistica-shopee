@@ -8,6 +8,17 @@ export type TipoOcorrencia =
   | "produto_danificado"
   | "outro";
 
+export type TipoCombustivel = "gasolina" | "etanol" | "diesel" | "gnv";
+
+export type ItemSubstituido =
+  | "oleoMotor"
+  | "oleoCambio"
+  | "oleoDiferencial"
+  | "filtroOleo"
+  | "filtroAr"
+  | "filtroCabine"
+  | "filtroCombustivel";
+
 export interface Cidade {
   id?: number;
   nome: string;
@@ -31,6 +42,7 @@ export interface Veiculo {
   modelo: string;
   motoristaPadrao?: string;
   ativo: boolean;
+  kmAtual?: number;
   criadoEm: string;
 }
 
@@ -70,6 +82,37 @@ export interface Rota {
   criadoEm: string;
 }
 
+export interface Abastecimento {
+  id?: number;
+  veiculoId: number;
+  veiculoPlaca: string;
+  data: string;
+  kmAtual: number;
+  litros: number;
+  valorTotal: number;
+  tipoCombustivel: TipoCombustivel;
+  posto?: string;
+  observacao?: string;
+  kmAnterior?: number;
+  consumoKmL?: number;
+  custoKm?: number;
+  criadoEm: string;
+}
+
+export interface Manutencao {
+  id?: number;
+  veiculoId: number;
+  veiculoPlaca: string;
+  data: string;
+  kmAtual: number;
+  tipoOleo: string;
+  itensSubstituidos: ItemSubstituido[];
+  proximaTrocaKm?: number;
+  proximaTrocaData?: string;
+  observacao?: string;
+  criadoEm: string;
+}
+
 interface LogisticaDB extends DBSchema {
   cidades: {
     key: number;
@@ -91,6 +134,16 @@ interface LogisticaDB extends DBSchema {
     value: Rota;
     indexes: { por_data: string; por_status: string };
   };
+  abastecimentos: {
+    key: number;
+    value: Abastecimento;
+    indexes: { por_veiculo: number; por_data: string };
+  };
+  manutencoes: {
+    key: number;
+    value: Manutencao;
+    indexes: { por_veiculo: number; por_data: string };
+  };
 }
 
 let dbInstance: IDBPDatabase<LogisticaDB> | null = null;
@@ -98,32 +151,50 @@ let dbInstance: IDBPDatabase<LogisticaDB> | null = null;
 export async function getDB(): Promise<IDBPDatabase<LogisticaDB>> {
   if (dbInstance) return dbInstance;
 
-  dbInstance = await openDB<LogisticaDB>("logistica-shopee", 1, {
-    upgrade(db) {
-      const cidades = db.createObjectStore("cidades", {
-        keyPath: "id",
-        autoIncrement: true,
-      });
-      cidades.createIndex("por_nome", "nome");
+  dbInstance = await openDB<LogisticaDB>("logistica-shopee", 2, {
+    upgrade(db, oldVersion) {
+      if (oldVersion < 1) {
+        const cidades = db.createObjectStore("cidades", {
+          keyPath: "id",
+          autoIncrement: true,
+        });
+        cidades.createIndex("por_nome", "nome");
 
-      const entregadores = db.createObjectStore("entregadores", {
-        keyPath: "id",
-        autoIncrement: true,
-      });
-      entregadores.createIndex("por_nome", "nome");
+        const entregadores = db.createObjectStore("entregadores", {
+          keyPath: "id",
+          autoIncrement: true,
+        });
+        entregadores.createIndex("por_nome", "nome");
 
-      const veiculos = db.createObjectStore("veiculos", {
-        keyPath: "id",
-        autoIncrement: true,
-      });
-      veiculos.createIndex("por_placa", "placa");
+        const veiculos = db.createObjectStore("veiculos", {
+          keyPath: "id",
+          autoIncrement: true,
+        });
+        veiculos.createIndex("por_placa", "placa");
 
-      const rotas = db.createObjectStore("rotas", {
-        keyPath: "id",
-        autoIncrement: true,
-      });
-      rotas.createIndex("por_data", "data");
-      rotas.createIndex("por_status", "status");
+        const rotas = db.createObjectStore("rotas", {
+          keyPath: "id",
+          autoIncrement: true,
+        });
+        rotas.createIndex("por_data", "data");
+        rotas.createIndex("por_status", "status");
+      }
+
+      if (oldVersion < 2) {
+        const abastecimentos = db.createObjectStore("abastecimentos", {
+          keyPath: "id",
+          autoIncrement: true,
+        });
+        abastecimentos.createIndex("por_veiculo", "veiculoId");
+        abastecimentos.createIndex("por_data", "data");
+
+        const manutencoes = db.createObjectStore("manutencoes", {
+          keyPath: "id",
+          autoIncrement: true,
+        });
+        manutencoes.createIndex("por_veiculo", "veiculoId");
+        manutencoes.createIndex("por_data", "data");
+      }
     },
   });
 
@@ -190,6 +261,11 @@ export async function deletarVeiculo(id: number): Promise<void> {
   await db.delete("veiculos", id);
 }
 
+export async function buscarVeiculo(id: number): Promise<Veiculo | undefined> {
+  const db = await getDB();
+  return db.get("veiculos", id);
+}
+
 // ── Rotas ─────────────────────────────────────────────────
 export async function listarRotas(): Promise<Rota[]> {
   const db = await getDB();
@@ -219,6 +295,124 @@ export async function rotaEmAndamento(): Promise<Rota | undefined> {
   return todas[0];
 }
 
+// ── Abastecimentos ────────────────────────────────────────
+export async function listarAbastecimentosPorVeiculo(
+  veiculoId: number
+): Promise<Abastecimento[]> {
+  const db = await getDB();
+  const todos = await db.getAllFromIndex("abastecimentos", "por_veiculo", veiculoId);
+  return todos.sort((a, b) => b.kmAtual - a.kmAtual);
+}
+
+export async function listarAbastecimentosPorPeriodo(
+  dataInicio: string,
+  dataFim: string,
+  veiculoId?: number
+): Promise<Abastecimento[]> {
+  const db = await getDB();
+  const todos = await db.getAll("abastecimentos");
+  return todos
+    .filter((a) => {
+      const dentroDoperiodo = a.data >= dataInicio && a.data <= dataFim;
+      if (veiculoId !== undefined) return dentroDoperiodo && a.veiculoId === veiculoId;
+      return dentroDoperiodo;
+    })
+    .sort((a, b) => b.data.localeCompare(a.data));
+}
+
+export async function buscarUltimoAbastecimento(
+  veiculoId: number,
+  kmMenorQue: number
+): Promise<Abastecimento | undefined> {
+  const todos = await listarAbastecimentosPorVeiculo(veiculoId);
+  return todos.find((a) => a.kmAtual < kmMenorQue);
+}
+
+export async function salvarAbastecimento(a: Abastecimento): Promise<number> {
+  const db = await getDB();
+
+  const dados = { ...a };
+
+  if (!dados.id) {
+    // Calcula consumo com base no abastecimento anterior
+    const anterior = await buscarUltimoAbastecimento(a.veiculoId, a.kmAtual);
+    if (anterior) {
+      const kmPercorridos = a.kmAtual - anterior.kmAtual;
+      if (kmPercorridos > 0 && anterior.litros > 0) {
+        dados.kmAnterior = anterior.kmAtual;
+        dados.consumoKmL = kmPercorridos / anterior.litros;
+        dados.custoKm = a.valorTotal / kmPercorridos;
+      }
+    }
+    dados.criadoEm = new Date().toISOString();
+
+    // Atualiza kmAtual do veículo
+    const veiculo = await buscarVeiculo(a.veiculoId);
+    if (veiculo && (veiculo.kmAtual === undefined || a.kmAtual > veiculo.kmAtual)) {
+      await salvarVeiculo({ ...veiculo, kmAtual: a.kmAtual });
+    }
+
+    return db.add("abastecimentos", dados);
+  }
+
+  await db.put("abastecimentos", dados);
+  return dados.id!;
+}
+
+export async function deletarAbastecimento(id: number): Promise<void> {
+  const db = await getDB();
+  await db.delete("abastecimentos", id);
+}
+
+// ── Manutenções ───────────────────────────────────────────
+export async function listarManutencoesPorVeiculo(
+  veiculoId: number
+): Promise<Manutencao[]> {
+  const db = await getDB();
+  const todas = await db.getAllFromIndex("manutencoes", "por_veiculo", veiculoId);
+  return todas.sort((a, b) => b.kmAtual - a.kmAtual);
+}
+
+export async function buscarUltimaManutencao(
+  veiculoId: number
+): Promise<Manutencao | undefined> {
+  const lista = await listarManutencoesPorVeiculo(veiculoId);
+  return lista[0];
+}
+
+export async function salvarManutencao(m: Manutencao): Promise<number> {
+  const db = await getDB();
+  if (m.id) {
+    await db.put("manutencoes", m);
+    return m.id;
+  }
+
+  // Atualiza kmAtual do veículo
+  const veiculo = await buscarVeiculo(m.veiculoId);
+  if (veiculo && (veiculo.kmAtual === undefined || m.kmAtual > veiculo.kmAtual)) {
+    await salvarVeiculo({ ...veiculo, kmAtual: m.kmAtual });
+  }
+
+  return db.add("manutencoes", { ...m, criadoEm: new Date().toISOString() });
+}
+
+export async function deletarManutencao(id: number): Promise<void> {
+  const db = await getDB();
+  await db.delete("manutencoes", id);
+}
+
+export function manutencaoVencida(
+  ultima: Manutencao,
+  kmAtual: number
+): boolean {
+  if (ultima.proximaTrocaKm && kmAtual >= ultima.proximaTrocaKm) return true;
+  if (ultima.proximaTrocaData) {
+    const hoje = new Date().toISOString().split("T")[0];
+    if (hoje >= ultima.proximaTrocaData) return true;
+  }
+  return false;
+}
+
 // ── Helpers ───────────────────────────────────────────────
 export const TIPOS_OCORRENCIA: Record<TipoOcorrencia, string> = {
   recusa_cliente: "Recusa do Cliente",
@@ -227,6 +421,23 @@ export const TIPOS_OCORRENCIA: Record<TipoOcorrencia, string> = {
   cliente_ausente: "Cliente Ausente",
   produto_danificado: "Produto Danificado",
   outro: "Outro",
+};
+
+export const TIPOS_COMBUSTIVEL: Record<TipoCombustivel, string> = {
+  gasolina: "Gasolina",
+  etanol: "Etanol",
+  diesel: "Diesel",
+  gnv: "GNV",
+};
+
+export const ITENS_SUBSTITUIDOS_LABELS: Record<ItemSubstituido, string> = {
+  oleoMotor: "Óleo do Motor",
+  oleoCambio: "Óleo do Câmbio",
+  oleoDiferencial: "Óleo do Diferencial",
+  filtroOleo: "Filtro de Óleo",
+  filtroAr: "Filtro de Ar",
+  filtroCabine: "Filtro de Cabine",
+  filtroCombustivel: "Filtro de Combustível",
 };
 
 export function formatarData(iso: string): string {

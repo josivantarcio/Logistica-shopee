@@ -1,8 +1,21 @@
-import { Rota, ItemRota } from "./db";
+import { Rota, ItemRota, Abastecimento, Manutencao, Veiculo, TIPOS_COMBUSTIVEL, ITENS_SUBSTITUIDOS_LABELS } from "./db";
 
 function formatarDataHora(data: string, hora: string): string {
   const [ano, mes, dia] = data.split("-");
   return `${dia}/${mes}/${ano} às ${hora}`;
+}
+
+function formatarDataBR(data: string): string {
+  const [ano, mes, dia] = data.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
+
+function formatarKmL(valor: number): string {
+  return valor.toFixed(2).replace(".", ",");
+}
+
+function formatarReais(valor: number): string {
+  return valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
 export function mensagemSaidaRota(rota: Rota): string {
@@ -59,7 +72,7 @@ export function mensagemCidadeConcluida(rota: Rota, item: ItemRota): string {
   );
 }
 
-export function mensagemEncerramentoRota(rota: Rota): string {
+export function mensagemEncerramentoRota(rota: Rota, consumoMedioVeiculo?: number): string {
   const totalVolumes = rota.itens.reduce((s, i) => s + i.volumesSaida, 0);
   const totalEntregues = rota.itens.reduce(
     (s, i) =>
@@ -104,6 +117,9 @@ export function mensagemEncerramentoRota(rota: Rota): string {
     (kmRodados !== null
       ? `🛣️ KM saída: *${rota.kmSaida}* | Chegada: *${rota.kmChegada}* | Rodados: *${kmRodados} km*\n`
       : `🛣️ KM saída: *${rota.kmSaida}*\n`) +
+    (consumoMedioVeiculo !== undefined
+      ? `⛽ Consumo médio do veículo: *${formatarKmL(consumoMedioVeiculo)} km/L*\n`
+      : "") +
     `\n` +
     `📊 *Resumo geral:*\n` +
     `   📦 Total: *${totalVolumes}* | Entregues: *${totalEntregues}* | Devolvidos: *${totalDevolvidos}*\n` +
@@ -115,6 +131,127 @@ export function mensagemEncerramentoRota(rota: Rota): string {
     `${linhasCidades}\n` +
     `\n` +
     `_Sistema Logística Shopee_`
+  );
+}
+
+export function mensagemAbastecimento(a: Abastecimento, veiculo: Veiculo): string {
+  const combustivel = TIPOS_COMBUSTIVEL[a.tipoCombustivel];
+  return (
+    `⛽ *ABASTECIMENTO REGISTRADO*\n` +
+    `\n` +
+    `🚗 Veículo: *${veiculo.placa}* — ${veiculo.modelo}\n` +
+    `📅 Data: *${formatarDataBR(a.data)}*\n` +
+    `🛣️ KM atual: *${a.kmAtual}*\n` +
+    `\n` +
+    `🔧 Combustível: *${combustivel}*\n` +
+    `💧 Litros: *${a.litros.toFixed(2).replace(".", ",")} L*\n` +
+    `💰 Valor total: *${formatarReais(a.valorTotal)}*\n` +
+    (a.posto ? `📍 Posto: *${a.posto}*\n` : "") +
+    (a.consumoKmL !== undefined
+      ? `\n📊 *Consumo calculado:*\n` +
+        `   ⚡ ${formatarKmL(a.consumoKmL)} km/L\n` +
+        (a.custoKm !== undefined
+          ? `   💵 ${formatarReais(a.custoKm)}/km\n`
+          : "")
+      : "") +
+    (a.observacao ? `\n📝 ${a.observacao}\n` : "") +
+    `\n_Sistema Logística Shopee_`
+  );
+}
+
+export function mensagemManutencao(m: Manutencao, veiculo: Veiculo): string {
+  const itens = m.itensSubstituidos
+    .map((i) => `   ✅ ${ITENS_SUBSTITUIDOS_LABELS[i]}`)
+    .join("\n");
+
+  return (
+    `🔧 *MANUTENÇÃO REGISTRADA*\n` +
+    `\n` +
+    `🚗 Veículo: *${veiculo.placa}* — ${veiculo.modelo}\n` +
+    `📅 Data: *${formatarDataBR(m.data)}*\n` +
+    `🛣️ KM atual: *${m.kmAtual}*\n` +
+    `\n` +
+    `🛢️ Óleo: *${m.tipoOleo}*\n` +
+    `\n` +
+    `*Itens substituídos:*\n` +
+    `${itens}\n` +
+    (m.proximaTrocaKm || m.proximaTrocaData
+      ? `\n⏰ *Próxima troca:*\n` +
+        (m.proximaTrocaKm ? `   🛣️ KM: *${m.proximaTrocaKm}*\n` : "") +
+        (m.proximaTrocaData ? `   📅 Data: *${formatarDataBR(m.proximaTrocaData)}*\n` : "")
+      : "") +
+    (m.observacao ? `\n📝 ${m.observacao}\n` : "") +
+    `\n_Sistema Logística Shopee_`
+  );
+}
+
+export function mensagemRelatorioAbastecimentos(
+  veiculo: Veiculo | null,
+  dataInicio: string,
+  dataFim: string,
+  lista: Abastecimento[]
+): string {
+  const totalGasto = lista.reduce((s, a) => s + a.valorTotal, 0);
+  const totalLitros = lista.reduce((s, a) => s + a.litros, 0);
+  const comConsumo = lista.filter((a) => a.consumoKmL !== undefined);
+  const consumoMedio =
+    comConsumo.length > 0
+      ? comConsumo.reduce((s, a) => s + a.consumoKmL!, 0) / comConsumo.length
+      : null;
+
+  const cabecalho = veiculo
+    ? `🚗 Veículo: *${veiculo.placa}* — ${veiculo.modelo}\n`
+    : `🚗 Veículo: *Todos os veículos*\n`;
+
+  const historico = lista
+    .map(
+      (a) =>
+        `   📅 ${formatarDataBR(a.data)} · KM ${a.kmAtual} · ${a.litros.toFixed(1).replace(".", ",")}L · ${formatarReais(a.valorTotal)}` +
+        (a.consumoKmL !== undefined ? ` · ${formatarKmL(a.consumoKmL)} km/L` : "")
+    )
+    .join("\n");
+
+  return (
+    `⛽ *RELATÓRIO DE ABASTECIMENTOS*\n` +
+    `📆 Período: *${formatarDataBR(dataInicio)} a ${formatarDataBR(dataFim)}*\n` +
+    `\n` +
+    cabecalho +
+    `\n` +
+    `📊 *Resumo:*\n` +
+    `   💰 Total gasto: *${formatarReais(totalGasto)}*\n` +
+    `   💧 Total litros: *${totalLitros.toFixed(2).replace(".", ",")} L*\n` +
+    (consumoMedio !== null
+      ? `   ⚡ Consumo médio: *${formatarKmL(consumoMedio)} km/L*\n`
+      : "") +
+    `   📋 Registros: *${lista.length}*\n` +
+    (lista.length > 0
+      ? `\n*Histórico:*\n${historico}\n`
+      : "") +
+    `\n_Sistema Logística Shopee_`
+  );
+}
+
+export function mensagemRelatorioManutencoes(
+  veiculo: Veiculo,
+  lista: Manutencao[]
+): string {
+  const historico = lista
+    .map(
+      (m) =>
+        `   📅 ${formatarDataBR(m.data)} · KM ${m.kmAtual} · ${m.tipoOleo}\n` +
+        `      ${m.itensSubstituidos.map((i) => ITENS_SUBSTITUIDOS_LABELS[i]).join(", ")}`
+    )
+    .join("\n");
+
+  return (
+    `🔧 *HISTÓRICO DE MANUTENÇÕES*\n` +
+    `\n` +
+    `🚗 Veículo: *${veiculo.placa}* — ${veiculo.modelo}\n` +
+    `📋 Total de registros: *${lista.length}*\n` +
+    (lista.length > 0
+      ? `\n*Registros:*\n${historico}\n`
+      : "") +
+    `\n_Sistema Logística Shopee_`
   );
 }
 

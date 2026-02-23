@@ -9,10 +9,15 @@ import {
   CheckCircle2,
   Plus,
   ArrowRight,
+  Wrench,
+  BarChart2,
 } from "lucide-react";
 import {
   rotaEmAndamento,
   listarRotas,
+  listarVeiculos,
+  buscarUltimaManutencao,
+  manutencaoVencida,
   dataHojeISO,
   Rota,
 } from "@/lib/db";
@@ -20,17 +25,33 @@ import {
 export default function Dashboard() {
   const [rotaAtiva, setRotaAtiva] = useState<Rota | null>(null);
   const [rotasHoje, setRotasHoje] = useState<Rota[]>([]);
+  const [alertasManutencao, setAlertasManutencao] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function carregar() {
       try {
-        const [ativa, todas] = await Promise.all([
+        const [ativa, todas, veiculos] = await Promise.all([
           rotaEmAndamento(),
           listarRotas(),
+          listarVeiculos(),
         ]);
         setRotaAtiva(ativa ?? null);
         setRotasHoje(todas.filter((r) => r.data === dataHojeISO()));
+
+        let alertas = 0;
+        await Promise.all(
+          veiculos
+            .filter((v) => v.ativo)
+            .map(async (v) => {
+              if (!v.id) return;
+              const ultima = await buscarUltimaManutencao(v.id);
+              if (ultima && manutencaoVencida(ultima, v.kmAtual ?? ultima.kmAtual)) {
+                alertas++;
+              }
+            })
+        );
+        setAlertasManutencao(alertas);
       } finally {
         setLoading(false);
       }
@@ -68,6 +89,24 @@ export default function Dashboard() {
       </header>
 
       <div className="flex flex-col gap-4 p-4">
+        {/* Alerta de manutenção vencida */}
+        {!loading && alertasManutencao > 0 && (
+          <Link href="/manutencao">
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-center gap-3">
+              <div className="bg-red-500 text-white rounded-full p-2">
+                <Wrench size={20} />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-red-700">Manutenção Vencida</p>
+                <p className="text-sm text-red-600">
+                  {alertasManutencao} veículo{alertasManutencao > 1 ? "s" : ""} com manutenção atrasada
+                </p>
+              </div>
+              <ArrowRight size={20} className="text-red-500" />
+            </div>
+          </Link>
+        )}
+
         {/* Rota ativa */}
         {loading ? (
           <div className="bg-white rounded-2xl p-4 animate-pulse h-24" />
@@ -139,13 +178,18 @@ export default function Dashboard() {
             { href: "/cadastros/entregadores", label: "Gerenciar Entregadores" },
             { href: "/cadastros/veiculos", label: "Gerenciar Veículos" },
             { href: "/historico", label: "Histórico de Rotas" },
-          ].map(({ href, label }) => (
+            { href: "/manutencao", label: "Manutenção & Frota", icon: Wrench },
+            { href: "/relatorios", label: "Relatórios", icon: BarChart2 },
+          ].map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}
               className="flex items-center justify-between px-4 py-3 border-t border-gray-100 active:bg-gray-50"
             >
-              <span className="text-sm text-gray-700">{label}</span>
+              <div className="flex items-center gap-2">
+                {Icon && <Icon size={15} className="text-gray-400" />}
+                <span className="text-sm text-gray-700">{label}</span>
+              </div>
               <ArrowRight size={16} className="text-gray-400" />
             </Link>
           ))}
