@@ -20,6 +20,8 @@ import {
   buscarRota,
   salvarRota,
   listarAbastecimentosPorVeiculo,
+  buscarUltimaManutencao,
+  manutencaoVencida,
   horaAtual,
   Rota,
   ItemRota,
@@ -57,16 +59,24 @@ export default function RotaPage({
   const [mostraFinalizacao, setMostraFinalizacao] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [consumoMedioVeiculo, setConsumoMedioVeiculo] = useState<number | undefined>(undefined);
+  const [alertaManutencaoVeiculo, setAlertaManutencaoVeiculo] = useState(false);
+  const [erroKm, setErroKm] = useState("");
 
   async function carregar() {
     const r = await buscarRota(Number(id));
     if (r) {
       setRota(r);
-      const abs = await listarAbastecimentosPorVeiculo(r.veiculoId);
+      const [abs, ultimaMan] = await Promise.all([
+        listarAbastecimentosPorVeiculo(r.veiculoId),
+        buscarUltimaManutencao(r.veiculoId),
+      ]);
       const comConsumo = abs.filter((a) => a.consumoKmL !== undefined).slice(0, 5);
       if (comConsumo.length > 0) {
         const media = comConsumo.reduce((s, a) => s + a.consumoKmL!, 0) / comConsumo.length;
         setConsumoMedioVeiculo(media);
+      }
+      if (ultimaMan) {
+        setAlertaManutencaoVeiculo(manutencaoVencida(ultimaMan, r.kmSaida));
       }
     }
   }
@@ -157,6 +167,17 @@ export default function RotaPage({
 
   async function finalizarRota(enviarWhatsApp: boolean) {
     if (!rota) return;
+    if (!kmChegada || isNaN(Number(kmChegada)) || Number(kmChegada) <= rota.kmSaida) {
+      setErroKm(
+        !kmChegada
+          ? "Informe o KM de chegada"
+          : Number(kmChegada) <= rota.kmSaida
+          ? `KM deve ser maior que o de saída (${rota.kmSaida})`
+          : "KM inválido"
+      );
+      return;
+    }
+    setErroKm("");
     setSalvando(true);
     try {
       const horaFim = horaAtual();
@@ -164,12 +185,12 @@ export default function RotaPage({
         ...rota,
         status: "concluida",
         horaChegada: horaFim,
-        kmChegada: kmChegada ? Number(kmChegada) : undefined,
+        kmChegada: Number(kmChegada),
       };
       await salvarRota(rotaFinalizada);
 
       if (enviarWhatsApp) {
-        const msg = mensagemEncerramentoRota(rotaFinalizada, consumoMedioVeiculo);
+        const msg = mensagemEncerramentoRota(rotaFinalizada, consumoMedioVeiculo, alertaManutencaoVeiculo);
         abrirWhatsApp(msg);
       }
 
@@ -389,11 +410,12 @@ export default function RotaPage({
             {mostraFinalizacao ? (
               <>
                 <Input
-                  label="KM chegada"
+                  label="KM chegada *"
                   type="number"
                   value={kmChegada}
-                  onChange={(e) => setKmChegada(e.target.value)}
+                  onChange={(e) => { setKmChegada(e.target.value); setErroKm(""); }}
                   placeholder={`Saída: ${rota.kmSaida}`}
+                  erro={erroKm}
                 />
                 <Btn
                   variante="whatsapp"

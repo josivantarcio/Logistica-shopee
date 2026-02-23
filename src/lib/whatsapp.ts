@@ -72,7 +72,7 @@ export function mensagemCidadeConcluida(rota: Rota, item: ItemRota): string {
   );
 }
 
-export function mensagemEncerramentoRota(rota: Rota, consumoMedioVeiculo?: number): string {
+export function mensagemEncerramentoRota(rota: Rota, consumoMedioVeiculo?: number, alertaManutencao?: boolean): string {
   const totalVolumes = rota.itens.reduce((s, i) => s + i.volumesSaida, 0);
   const totalEntregues = rota.itens.reduce(
     (s, i) =>
@@ -119,6 +119,9 @@ export function mensagemEncerramentoRota(rota: Rota, consumoMedioVeiculo?: numbe
       : `🛣️ KM saída: *${rota.kmSaida}*\n`) +
     (consumoMedioVeiculo !== undefined
       ? `⛽ Consumo médio do veículo: *${formatarKmL(consumoMedioVeiculo)} km/L*\n`
+      : "") +
+    (alertaManutencao
+      ? `🔴 *ATENÇÃO: Manutenção do veículo está vencida!*\n`
       : "") +
     `\n` +
     `📊 *Resumo geral:*\n` +
