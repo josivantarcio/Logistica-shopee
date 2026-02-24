@@ -9,7 +9,7 @@ const tabs = [
   { href: "/rota/nova", label: "Rota", icon: Plus },
   { href: "/historico", label: "Histórico", icon: Clock },
   { href: "/manutencao", label: "Frota", icon: Wrench },
-  { href: "/cadastros/cidades", label: "Cadastros", icon: Settings },
+  { href: "/cadastros", label: "Cadastros", icon: Settings },
 ];
 
 export default function BottomNav() {

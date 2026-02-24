@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   Truck,
   Flag,
+  Clock,
 } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import Btn from "@/components/Btn";
@@ -38,6 +39,12 @@ interface ModalOcorrencia {
   quantidade: string;
 }
 
+interface ModalConcluirCidade {
+  idx: number;
+  hora: string;
+  enviarWhatsApp: boolean;
+}
+
 const MODAL_VAZIO: ModalOcorrencia = {
   idxCidade: 0,
   tipo: "recusa_cliente",
@@ -55,7 +62,9 @@ export default function RotaPage({
   const [rota, setRota] = useState<Rota | null>(null);
   const [abertos, setAbertos] = useState<Set<number>>(new Set([0]));
   const [modalOco, setModalOco] = useState<ModalOcorrencia | null>(null);
+  const [modalConcluir, setModalConcluir] = useState<ModalConcluirCidade | null>(null);
   const [kmChegada, setKmChegada] = useState("");
+  const [horaChegada, setHoraChegada] = useState(horaAtual());
   const [mostraFinalizacao, setMostraFinalizacao] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [consumoMedioVeiculo, setConsumoMedioVeiculo] = useState<number | undefined>(undefined);
@@ -92,15 +101,20 @@ export default function RotaPage({
     });
   }
 
-  async function concluirCidade(idx: number, enviarWhatsApp: boolean) {
-    if (!rota) return;
+  function abrirModalConcluir(idx: number, enviarWhatsApp: boolean) {
+    setModalConcluir({ idx, hora: horaAtual(), enviarWhatsApp });
+  }
+
+  async function confirmarConclusaoCidade() {
+    if (!rota || !modalConcluir) return;
+    const { idx, hora, enviarWhatsApp } = modalConcluir;
     setSalvando(true);
     try {
       const novosItens = [...rota.itens];
       novosItens[idx] = {
         ...novosItens[idx],
         concluido: true,
-        horaConclusao: horaAtual(),
+        horaConclusao: hora,
       };
       const rotaAtualizada = { ...rota, itens: novosItens };
       await salvarRota(rotaAtualizada);
@@ -110,6 +124,7 @@ export default function RotaPage({
         const msg = mensagemCidadeConcluida(rotaAtualizada, novosItens[idx]);
         abrirWhatsApp(msg);
       }
+      setModalConcluir(null);
     } finally {
       setSalvando(false);
     }
@@ -180,11 +195,10 @@ export default function RotaPage({
     setErroKm("");
     setSalvando(true);
     try {
-      const horaFim = horaAtual();
       const rotaFinalizada: Rota = {
         ...rota,
         status: "concluida",
-        horaChegada: horaFim,
+        horaChegada: horaChegada,
         kmChegada: Number(kmChegada),
       };
       await salvarRota(rotaFinalizada);
@@ -237,7 +251,7 @@ export default function RotaPage({
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 p-4">
+      <div className="flex flex-col gap-3 p-4 pb-24">
         {/* Itens de rota */}
         {rota.itens.map((item: ItemRota, idx: number) => (
           <div
@@ -380,7 +394,7 @@ export default function RotaPage({
                     <Btn
                       variante="whatsapp"
                       fullWidth
-                      onClick={() => concluirCidade(idx, true)}
+                      onClick={() => abrirModalConcluir(idx, true)}
                       disabled={salvando}
                     >
                       <MessageCircle size={16} />
@@ -388,7 +402,7 @@ export default function RotaPage({
                     </Btn>
                     <Btn
                       variante="secundario"
-                      onClick={() => concluirCidade(idx, false)}
+                      onClick={() => abrirModalConcluir(idx, false)}
                       disabled={salvando}
                     >
                       ✓
@@ -409,14 +423,28 @@ export default function RotaPage({
             </div>
             {mostraFinalizacao ? (
               <>
-                <Input
-                  label="KM chegada *"
-                  type="number"
-                  value={kmChegada}
-                  onChange={(e) => { setKmChegada(e.target.value); setErroKm(""); }}
-                  placeholder={`Saída: ${rota.kmSaida}`}
-                  erro={erroKm}
-                />
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    label="KM chegada *"
+                    type="number"
+                    value={kmChegada}
+                    onChange={(e) => { setKmChegada(e.target.value); setErroKm(""); }}
+                    placeholder={`Saída: ${rota.kmSaida}`}
+                    erro={erroKm}
+                  />
+                  <div className="flex flex-col gap-1">
+                    <label className="text-sm font-medium text-gray-700 flex items-center gap-1">
+                      <Clock size={13} /> Hora chegada
+                    </label>
+                    <input
+                      type="time"
+                      value={horaChegada}
+                      onChange={(e) => setHoraChegada(e.target.value)}
+                      className="border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400/40 focus:border-green-500"
+                    />
+                    <p className="text-xs text-gray-400">Edite se o horário não for agora</p>
+                  </div>
+                </div>
                 <Btn
                   variante="whatsapp"
                   fullWidth
@@ -453,10 +481,73 @@ export default function RotaPage({
         )}
       </div>
 
+      {/* Modal Concluir Cidade (com hora editável) */}
+      {modalConcluir && (
+        <div
+          className="fixed inset-0 bg-black/50 z-[60] flex items-end"
+          onClick={(e) => { if (e.target === e.currentTarget) setModalConcluir(null); }}
+        >
+          <div className="bg-white w-full max-w-md mx-auto rounded-t-3xl">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-gray-100">
+              <h3 className="font-bold text-gray-800">Confirmar Conclusão</h3>
+              <button
+                onClick={() => setModalConcluir(null)}
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 active:bg-gray-200"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="px-5 py-4 flex flex-col gap-4">
+              <p className="text-sm text-gray-500">
+                Cidade:{" "}
+                <span className="font-bold text-gray-800">
+                  {rota.itens[modalConcluir.idx].cidadeNome}
+                </span>
+              </p>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700 flex items-center gap-1">
+                  <Clock size={13} /> Hora de conclusão
+                </label>
+                <input
+                  type="time"
+                  value={modalConcluir.hora}
+                  onChange={(e) =>
+                    setModalConcluir({ ...modalConcluir, hora: e.target.value })
+                  }
+                  className="border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#ee4d2d]/40 focus:border-[#ee4d2d]"
+                />
+                <p className="text-xs text-gray-400">
+                  Ajuste se o horário real foi diferente
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 px-5 pb-5">
+              <Btn variante="secundario" fullWidth onClick={() => setModalConcluir(null)}>
+                Cancelar
+              </Btn>
+              <Btn
+                fullWidth
+                variante={modalConcluir.enviarWhatsApp ? "whatsapp" : "primario"}
+                onClick={confirmarConclusaoCidade}
+                disabled={salvando}
+              >
+                {modalConcluir.enviarWhatsApp ? (
+                  <>
+                    <MessageCircle size={15} /> Concluir + WA
+                  </>
+                ) : (
+                  "Confirmar"
+                )}
+              </Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Ocorrência */}
       {modalOco && (
         <div
-          className="fixed inset-0 bg-black/50 z-50 flex items-end"
+          className="fixed inset-0 bg-black/50 z-[60] flex items-end"
           onClick={(e) => { if (e.target === e.currentTarget) setModalOco(null); }}
         >
           <div className="bg-white w-full max-w-md mx-auto rounded-t-3xl flex flex-col max-h-[90vh]">
@@ -474,7 +565,10 @@ export default function RotaPage({
             {/* Conteúdo com scroll */}
             <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
               <p className="text-sm text-gray-500">
-                Cidade: <span className="font-bold text-gray-800">{rota.itens[modalOco.idxCidade].cidadeNome}</span>
+                Cidade:{" "}
+                <span className="font-bold text-gray-800">
+                  {rota.itens[modalOco.idxCidade].cidadeNome}
+                </span>
               </p>
 
               <div className="flex flex-col gap-1">

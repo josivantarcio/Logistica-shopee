@@ -6,6 +6,8 @@ export type TipoOcorrencia =
   | "nao_localizado"
   | "cliente_ausente"
   | "produto_danificado"
+  | "produto_fora_sistema"
+  | "rota_errada"
   | "outro";
 
 export type TipoCombustivel = "gasolina" | "etanol" | "diesel" | "gnv";
@@ -82,6 +84,23 @@ export interface Rota {
   criadoEm: string;
 }
 
+export interface ItemRotaModelo {
+  cidadeId: number;
+  cidadeNome: string;
+  entregadorId: number;
+  entregadorNome: string;
+}
+
+export interface RotaModelo {
+  id?: number;
+  nome: string;
+  descricao?: string;
+  veiculoId: number;
+  veiculoPlaca: string;
+  itens: ItemRotaModelo[];
+  criadoEm: string;
+}
+
 export interface Abastecimento {
   id?: number;
   veiculoId: number;
@@ -144,6 +163,11 @@ interface LogisticaDB extends DBSchema {
     value: Manutencao;
     indexes: { por_veiculo: number; por_data: string };
   };
+  rotasModelo: {
+    key: number;
+    value: RotaModelo;
+    indexes: { por_nome: string };
+  };
 }
 
 let dbInstance: IDBPDatabase<LogisticaDB> | null = null;
@@ -151,7 +175,7 @@ let dbInstance: IDBPDatabase<LogisticaDB> | null = null;
 export async function getDB(): Promise<IDBPDatabase<LogisticaDB>> {
   if (dbInstance) return dbInstance;
 
-  dbInstance = await openDB<LogisticaDB>("logistica-shopee", 2, {
+  dbInstance = await openDB<LogisticaDB>("logistica-shopee", 3, {
     upgrade(db, oldVersion) {
       if (oldVersion < 1) {
         const cidades = db.createObjectStore("cidades", {
@@ -194,6 +218,14 @@ export async function getDB(): Promise<IDBPDatabase<LogisticaDB>> {
         });
         manutencoes.createIndex("por_veiculo", "veiculoId");
         manutencoes.createIndex("por_data", "data");
+      }
+
+      if (oldVersion < 3) {
+        const rotasModelo = db.createObjectStore("rotasModelo", {
+          keyPath: "id",
+          autoIncrement: true,
+        });
+        rotasModelo.createIndex("por_nome", "nome");
       }
     },
   });
@@ -413,6 +445,27 @@ export function manutencaoVencida(
   return false;
 }
 
+// ── Rotas Modelo ──────────────────────────────────────────
+export async function listarRotasModelo(): Promise<RotaModelo[]> {
+  const db = await getDB();
+  const lista = await db.getAll("rotasModelo");
+  return lista.sort((a, b) => a.nome.localeCompare(b.nome));
+}
+
+export async function salvarRotaModelo(m: RotaModelo): Promise<number> {
+  const db = await getDB();
+  if (m.id) {
+    await db.put("rotasModelo", m);
+    return m.id;
+  }
+  return db.add("rotasModelo", { ...m, criadoEm: new Date().toISOString() });
+}
+
+export async function deletarRotaModelo(id: number): Promise<void> {
+  const db = await getDB();
+  await db.delete("rotasModelo", id);
+}
+
 // ── Helpers ───────────────────────────────────────────────
 export const TIPOS_OCORRENCIA: Record<TipoOcorrencia, string> = {
   recusa_cliente: "Recusa do Cliente",
@@ -420,6 +473,8 @@ export const TIPOS_OCORRENCIA: Record<TipoOcorrencia, string> = {
   nao_localizado: "Endereço Não Localizado",
   cliente_ausente: "Cliente Ausente",
   produto_danificado: "Produto Danificado",
+  produto_fora_sistema: "Produto Fora do Sistema",
+  rota_errada: "Produto em Rota Errada",
   outro: "Outro",
 };
 

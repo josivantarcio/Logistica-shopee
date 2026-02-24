@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, MapPin, MessageCircle } from "lucide-react";
+import { Plus, Trash2, MapPin, MessageCircle, RotateCcw, BookOpen } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import Btn from "@/components/Btn";
 import Input from "@/components/Input";
@@ -10,6 +10,7 @@ import {
   listarVeiculos,
   listarCidades,
   listarEntregadores,
+  listarRotasModelo,
   salvarRota,
   horaAtual,
   dataHojeISO,
@@ -18,6 +19,7 @@ import {
   Entregador,
   ItemRota,
   Rota,
+  RotaModelo,
 } from "@/lib/db";
 import { mensagemSaidaRota, abrirWhatsApp } from "@/lib/whatsapp";
 
@@ -33,12 +35,24 @@ const ITEM_VAZIO: ItemFormulario = {
   volumesSaida: "",
 };
 
+const RASCUNHO_KEY = "nova-rota-rascunho";
+
+interface Rascunho {
+  veiculoId: string;
+  motorista: string;
+  kmSaida: string;
+  horaSaida: string;
+  itens: ItemFormulario[];
+  savedAt: string;
+}
+
 export default function NovaRotaPage() {
   const router = useRouter();
 
   const [veiculos, setVeiculos] = useState<Veiculo[]>([]);
   const [cidades, setCidades] = useState<Cidade[]>([]);
   const [entregadores, setEntregadores] = useState<Entregador[]>([]);
+  const [modelos, setModelos] = useState<RotaModelo[]>([]);
 
   const [veiculoId, setVeiculoId] = useState("");
   const [motorista, setMotorista] = useState("");
@@ -47,20 +61,82 @@ export default function NovaRotaPage() {
   const [itens, setItens] = useState<ItemFormulario[]>([{ ...ITEM_VAZIO }]);
   const [erros, setErros] = useState<Record<string, string>>({});
   const [salvando, setSalvando] = useState(false);
+  const [temRascunho, setTemRascunho] = useState(false);
+  const [mostrarModelos, setMostrarModelos] = useState(false);
+  const carregadoRef = useRef(false);
 
   useEffect(() => {
     async function carregar() {
-      const [vs, cs, es] = await Promise.all([
+      const [vs, cs, es, ms] = await Promise.all([
         listarVeiculos(),
         listarCidades(),
         listarEntregadores(),
+        listarRotasModelo(),
       ]);
       setVeiculos(vs.filter((v) => v.ativo));
       setCidades(cs);
       setEntregadores(es.filter((e) => e.ativo));
+      setModelos(ms);
+
+      // Restaurar rascunho
+      const raw = localStorage.getItem(RASCUNHO_KEY);
+      if (raw) {
+        try {
+          const rascunho: Rascunho = JSON.parse(raw);
+          setVeiculoId(rascunho.veiculoId || "");
+          setMotorista(rascunho.motorista || "");
+          setKmSaida(rascunho.kmSaida || "");
+          setHoraSaida(rascunho.horaSaida || horaAtual());
+          setItens(rascunho.itens?.length ? rascunho.itens : [{ ...ITEM_VAZIO }]);
+          setTemRascunho(true);
+        } catch {
+          localStorage.removeItem(RASCUNHO_KEY);
+        }
+      }
+      carregadoRef.current = true;
     }
     carregar();
   }, []);
+
+  // Salvar rascunho automaticamente quando o formulário muda
+  useEffect(() => {
+    if (!carregadoRef.current) return;
+    const rascunho: Rascunho = {
+      veiculoId,
+      motorista,
+      kmSaida,
+      horaSaida,
+      itens,
+      savedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(RASCUNHO_KEY, JSON.stringify(rascunho));
+  }, [veiculoId, motorista, kmSaida, horaSaida, itens]);
+
+  function descartarRascunho() {
+    localStorage.removeItem(RASCUNHO_KEY);
+    setTemRascunho(false);
+    setVeiculoId("");
+    setMotorista("");
+    setKmSaida("");
+    setHoraSaida(horaAtual());
+    setItens([{ ...ITEM_VAZIO }]);
+    setErros({});
+  }
+
+  function aplicarModelo(modelo: RotaModelo) {
+    setVeiculoId(String(modelo.veiculoId));
+    // preenche motorista padrão do veículo se disponível
+    const v = veiculos.find((vv) => vv.id === modelo.veiculoId);
+    if (v?.motoristaPadrao) setMotorista(v.motoristaPadrao);
+    setItens(
+      modelo.itens.map((it) => ({
+        cidadeId: String(it.cidadeId),
+        entregadorId: String(it.entregadorId),
+        volumesSaida: "",
+      }))
+    );
+    setMostrarModelos(false);
+  }
 
   function selecionarVeiculo(id: string) {
     setVeiculoId(id);
@@ -143,6 +219,9 @@ export default function NovaRotaPage() {
 
       const id = await salvarRota(rota);
 
+      // Limpar rascunho após salvar com sucesso
+      localStorage.removeItem(RASCUNHO_KEY);
+
       if (enviarWhatsApp) {
         const rotaSalva = { ...rota, id };
         const msg = mensagemSaidaRota(rotaSalva);
@@ -156,10 +235,57 @@ export default function NovaRotaPage() {
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col pb-24">
       <PageHeader titulo="Nova Rota" voltar="/" />
 
       <div className="flex flex-col gap-4 p-4">
+        {/* Banner rascunho recuperado */}
+        {temRascunho && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-amber-800">Rascunho recuperado</p>
+              <p className="text-xs text-amber-600">Suas informações anteriores foram restauradas</p>
+            </div>
+            <button
+              onClick={descartarRascunho}
+              className="flex items-center gap-1 text-xs text-amber-700 font-semibold border border-amber-300 rounded-lg px-2 py-1 active:bg-amber-100"
+            >
+              <RotateCcw size={12} /> Descartar
+            </button>
+          </div>
+        )}
+
+        {/* Botão usar modelo */}
+        {modelos.length > 0 && (
+          <button
+            onClick={() => setMostrarModelos(!mostrarModelos)}
+            className="flex items-center gap-2 text-[#ee4d2d] text-sm font-semibold bg-orange-50 border border-orange-200 rounded-2xl px-4 py-3 active:opacity-70"
+          >
+            <BookOpen size={16} />
+            Usar rota modelo
+          </button>
+        )}
+
+        {/* Lista de modelos */}
+        {mostrarModelos && (
+          <div className="bg-white rounded-2xl shadow-sm p-4 flex flex-col gap-2">
+            <p className="text-sm font-semibold text-gray-700 mb-1">Escolha um modelo:</p>
+            {modelos.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => aplicarModelo(m)}
+                className="text-left border border-gray-200 rounded-xl px-3 py-2.5 active:bg-gray-50"
+              >
+                <p className="text-sm font-semibold text-gray-800">{m.nome}</p>
+                <p className="text-xs text-gray-500">
+                  {m.itens.length} parada(s)
+                  {m.descricao ? ` · ${m.descricao}` : ""}
+                </p>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Veículo */}
         <div className="bg-white rounded-2xl shadow-sm p-4 flex flex-col gap-3">
           <h2 className="font-semibold text-gray-700">Veículo</h2>
